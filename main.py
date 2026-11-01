@@ -9,7 +9,7 @@ from openai import OpenAI
 BASE_URL = "https://generativelanguage.googleapis.com/v1beta/openai/"
 MODEL = "gemini-3.5-flash"
 TEMPERATURE = 0.2
-MAX_OUTPUT_TOKENS = 80
+MAX_OUTPUT_TOKENS = 2000
 
 SYSTEM_INSTRUCTION = (
     "Ты помогаешь оператору службы поддержки. "
@@ -39,6 +39,17 @@ def build_messages(user_text: str) -> list[dict[str, str]]:
             "content": f"Обращение:\n{user_text}",
         }
     ]
+
+def validate_summarize(summary: str | None) -> str:
+    if summary is None:
+        raise ValueError("Модель не вернула текст")
+    cleaned = summary.strip()
+    if not cleaned:
+        raise ValueError("Модель вернула пустой ответ")
+    if len(cleaned) > 300:
+        raise ValueError("Резюме получилось слишком длинным")
+
+    return cleaned
 
 def summarize_request(client: OpenAI, user_text: str) -> None:
     """Кратко пересказывает обращение и печатает метрики запроса."""
@@ -83,10 +94,26 @@ def summarize_request(client: OpenAI, user_text: str) -> None:
 
     elapsed_seconds = perf_counter() - started_at
     choice = response.choices[0]
-    answer = choice.message.content
+    if choice.finish_reason == "length":
+        print(
+            "Ответ модели остановлен из-за ограничения длины. "
+            "Увеличьте MAX_OUTPUT_TOKENS или сократите задачу."
+        )
+        return
+    if choice.finish_reason != "stop":
+        print(
+            "Модель не вернула готовое резюме. "
+            f"Причина завершения: {choice.finish_reason}."
+        )
+        return
+    try:
+        answer = validate_summarize(choice.message.content)
+    except ValueError as error:
+        print(f"Некорректный ответ модели: {error}")
+        return
 
     print("Результат:")
-    print(answer or "Модель не вернула текст")
+    print(answer)
 
     print("\nМетрики:")
     print(f"Модель: {response.model}")
