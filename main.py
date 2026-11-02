@@ -1,15 +1,10 @@
-import os
-
 from time import perf_counter
 
 import openai
-from dotenv import load_dotenv
 from openai import OpenAI
+from pydantic import ValidationError
+from config import Settings
 
-BASE_URL = "https://generativelanguage.googleapis.com/v1beta/openai/"
-MODEL = "gemini-3.5-flash"
-TEMPERATURE = 0.2
-MAX_OUTPUT_TOKENS = 2000
 
 SYSTEM_INSTRUCTION = (
     "Ты помогаешь оператору службы поддержки. "
@@ -51,7 +46,7 @@ def validate_summarize(summary: str | None) -> str:
 
     return cleaned
 
-def summarize_request(client: OpenAI, user_text: str) -> None:
+def summarize_request(client: OpenAI, user_text: str, settings: Settings) -> None:
     """Кратко пересказывает обращение и печатает метрики запроса."""
     text = user_text.strip()
 
@@ -63,10 +58,10 @@ def summarize_request(client: OpenAI, user_text: str) -> None:
 
     try:
         response = client.chat.completions.create(
-            model=MODEL,
+            model=settings.model,
             messages=build_messages(text),
-            temperature=TEMPERATURE,
-            max_completion_tokens=MAX_OUTPUT_TOKENS,
+            temperature=settings.temperature,
+            max_completion_tokens=settings.max_output_tokens,
         )
 
     except openai.AuthenticationError:
@@ -96,8 +91,8 @@ def summarize_request(client: OpenAI, user_text: str) -> None:
     choice = response.choices[0]
     if choice.finish_reason == "length":
         print(
-            "Ответ модели остановлен из-за ограничения длины. "
-            "Увеличьте MAX_OUTPUT_TOKENS или сократите задачу."
+            "Ответ модели остановлен из-за ограничения длины: "
+            f"{settings.max_output_tokens} токенов."
         )
         return
     if choice.finish_reason != "stop":
@@ -126,18 +121,25 @@ def summarize_request(client: OpenAI, user_text: str) -> None:
     print(f"ID ответа: {response.id}")
 
 def main() -> None:
-    load_dotenv()
+    try:
+        settings = Settings()
+    except ValidationError as error:
+        print("Ошибка конфигурации:")
+        for issue in error.errors():
+            field = ".".join(str(part) for part in issue["loc"])
+            print(f"- {field}: {issue['msg']}")
+        return
 
-    token = os.getenv("LLM_API_KEY")
-    if not token:
-        raise SystemExit(
-            "Не найдена переменная LLM_API_KEY. "
-            "Проверьте файл .env в корне проекта."
-        )
 
-    client = OpenAI(base_url=BASE_URL, api_key=token)
+    client = OpenAI(
+        base_url=str(settings.base_url),
+        api_key=settings.llm_api_key.get_secret_value()
+    )
+    print(f"Окружение: {settings.app_env}")
+    print(f"Модель: {settings.model}")
+
     user_text = input("Введите текст обращения: ")
-    summarize_request(client, user_text)
+    summarize_request(client, user_text, settings)
 
 
 if __name__ == "__main__":
