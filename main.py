@@ -1,9 +1,9 @@
 from time import perf_counter
 
 import openai
-from openai import OpenAI
+from app.llm.client import LLMClient, LLMResult
 from pydantic import ValidationError
-from config import Settings
+from app.config import Settings
 
 
 SYSTEM_INSTRUCTION = (
@@ -14,14 +14,14 @@ SYSTEM_INSTRUCTION = (
     "Если данных недостаточно, прямо сообщай об этом."
 )
 
-def print_usage(usage) -> None:
-    if usage is None:
+def print_usage(result: LLMResult) -> None:
+    if result.total_tokens is None:
         print("Провайдер не вернул статистику токенов")
         return
 
-    print(f"Входные токены: {usage.prompt_tokens}")
-    print(f"Выходные токены: {usage.completion_tokens}")
-    print(f"Всего токенов: {usage.total_tokens}")
+    print(f"Входные токены: {result.prompt_tokens}")
+    print(f"Выходные токены: {result.completion_tokens}")
+    print(f"Всего токенов: {result.total_tokens}")
 
 def build_messages(user_text: str) -> list[dict[str, str]]:
     return [
@@ -46,7 +46,7 @@ def validate_summarize(summary: str | None) -> str:
 
     return cleaned
 
-def summarize_request(client: OpenAI, user_text: str, settings: Settings) -> None:
+def summarize_request(client: LLMClient, user_text: str, settings: Settings) -> None:
     """Кратко пересказывает обращение и печатает метрики запроса."""
     text = user_text.strip()
 
@@ -57,12 +57,7 @@ def summarize_request(client: OpenAI, user_text: str, settings: Settings) -> Non
     started_at = perf_counter()
 
     try:
-        response = client.chat.completions.create(
-            model=settings.model,
-            messages=build_messages(text),
-            temperature=settings.temperature,
-            max_completion_tokens=settings.max_output_tokens,
-        )
+        result = client.generate(build_messages(text))
 
     except openai.AuthenticationError:
         print("Ошибка авторизации: проверьте LLM_API_KEY.")
@@ -88,21 +83,21 @@ def summarize_request(client: OpenAI, user_text: str, settings: Settings) -> Non
         return
 
     elapsed_seconds = perf_counter() - started_at
-    choice = response.choices[0]
-    if choice.finish_reason == "length":
+
+    if result.finish_reason == "length":
         print(
             "Ответ модели остановлен из-за ограничения длины: "
             f"{settings.max_output_tokens} токенов."
         )
         return
-    if choice.finish_reason != "stop":
+    if result.finish_reason != "stop":
         print(
             "Модель не вернула готовое резюме. "
-            f"Причина завершения: {choice.finish_reason}."
+            f"Причина завершения: {result.finish_reason}."
         )
         return
     try:
-        answer = validate_summarize(choice.message.content)
+        answer = validate_summarize(result.text)
     except ValueError as error:
         print(f"Некорректный ответ модели: {error}")
         return
@@ -111,14 +106,13 @@ def summarize_request(client: OpenAI, user_text: str, settings: Settings) -> Non
     print(answer)
 
     print("\nМетрики:")
-    print(f"Модель: {response.model}")
-    print(f"Завершение: {choice.finish_reason}")
+    print(f"Модель: {result.model}")
+    print(f"Завершение: {result.finish_reason}")
     print(f"Время: {elapsed_seconds:.2f} с")
 
-    if response.usage is not None:
-        print_usage(response.usage)
+    print_usage(result)
 
-    print(f"ID ответа: {response.id}")
+    print(f"ID ответа: {result.response_id}")
 
 def main() -> None:
     try:
@@ -131,10 +125,7 @@ def main() -> None:
         return
 
 
-    client = OpenAI(
-        base_url=str(settings.base_url),
-        api_key=settings.llm_api_key.get_secret_value()
-    )
+    client = LLMClient(settings)
     print(f"Окружение: {settings.app_env}")
     print(f"Модель: {settings.model}")
 
