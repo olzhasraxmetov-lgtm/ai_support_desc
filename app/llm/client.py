@@ -1,7 +1,17 @@
 from dataclasses import dataclass
 
 from openai import OpenAI
+import openai
 
+from app.llm.errors import (
+    LLMAccessError,
+    LLMBalanceError,
+    LLMConnectionError,
+    LLMProviderError,
+    LLMRateLimitError,
+    LLMRequestError,
+    LLMTimeoutError,
+)
 from app.config import Settings
 
 
@@ -28,12 +38,65 @@ class LLMClient:
         )
 
     def generate(self, messages: list[Message]) -> LLMResult:
+        try:
+            return self._generate_once(messages)
+        except openai.AuthenticationError as error:
+            raise LLMAccessError(
+                "Провайдер отклонил API-ключ.",
+                request_id=error.request_id,
+            ) from error
+        except openai.PermissionDeniedError as error:
+            raise LLMAccessError(
+                "Недостаточно прав для обращения к модели.",
+                request_id=error.request_id,
+            ) from error
+        except (
+                openai.BadRequestError,
+                openai.NotFoundError,
+                openai.UnprocessableEntityError,
+        ) as error:
+            raise LLMRequestError(
+                "Провайдер отклонил модель или параметры запроса.",
+                request_id=error.request_id,
+            ) from error
+        except openai.RateLimitError as error:
+            raise LLMRateLimitError(
+                "Достигнуто ограничение частоты или квоты.",
+                request_id=error.request_id,
+            ) from error
+        except openai.APITimeoutError as error:
+            raise LLMTimeoutError("Провайдер не ответил за отведенное время.") from error
+        except openai.APIConnectionError as error:
+            raise LLMConnectionError("Не удалось соединиться с провайдером.") from error
+        except openai.APIResponseValidationError as error:
+            raise LLMProviderError(
+                "Провайдер вернул ответ неожиданного формата."
+            ) from error
+        except openai.APIStatusError as error:
+            if error.status_code == 402:
+                raise LLMBalanceError(
+                    "Недостаточно средств на балансе ProxyAPI.",
+                    request_id=error.request_id,
+                ) from error
+            raise LLMProviderError(
+                f"Провайдер вернул HTTP {error.status_code}.",
+                request_id=error.request_id,
+            ) from error
+        except openai.APIError as error:
+            raise LLMProviderError(
+                "SDK сообщил о неизвестной ошибке провайдера."
+            ) from error
+
+    def _generate_once(self, messages: list[Message]) -> LLMResult:
         response = self._client.chat.completions.create(
             model=self._settings.model,
             messages=messages,
             temperature=self._settings.temperature,
             max_completion_tokens=self._settings.max_output_tokens,
         )
+
+        if not response.choices:
+            raise LLMProviderError("Провайдер вернул ответ без вариантов продолжения.")
 
         choice = response.choices[0]
         usage = response.usage
