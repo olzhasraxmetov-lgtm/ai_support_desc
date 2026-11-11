@@ -26,6 +26,7 @@ def run_console(service: SupportService, app_env: str, configured_model: str) ->
     print("\nРезюме обращения:")
     print(result.text)
     print("\nМетрики запроса:")
+    print(f"Промпт: {result.prompt_id}@{result.prompt_version}")
     print(f"Модель ответа: {result.model}")
     print(f"Время ответа: {result.elapsed_seconds:.2f} с")
     print_usage(result)

@@ -1,9 +1,9 @@
 from app.prompts.template import PromptTemplate
 
 
-SUPPORT_SUMMARY_PROMPT = PromptTemplate(
+SUPPORT_SUMMARY_PROMPT_V1_1_0 = PromptTemplate(
     prompt_id="support_summary",
-    version="1.0.0",
+    version="1.1.0",
     body="""
 Ты помогаешь оператору службы поддержки кратко пересказывать
 обращения клиентов.
@@ -16,6 +16,7 @@ SUPPORT_SUMMARY_PROMPT = PromptTemplate(
 Правила:
 - Используй только факты, явно указанные в обращении.
 - Если они указаны, сохраняй номер заказа, дату и название товара.
+- Если проблем несколько и они равнозначны, сохрани каждую.
 - Не добавляй советы, решения, обещания и оценки.
 - Если деталь отсутствует или неясна, опусти ее.
 $additional_rules
